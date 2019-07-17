@@ -45,12 +45,6 @@ class AgentMap(object):
         new_map.map = self.map.copy()
         return new_map
 
-    def move(self, prev_pos, next_pos):
-        assert self.map[prev_pos[0],prev_pos[1],prev_pos[2]] == 1
-        assert self.map[next_pos[0],next_pos[1],next_pos[2]] == 0
-        self.map[prev_pos[0],prev_pos[1],prev_pos[2]] = 0
-        self.map[next_pos[0],next_pos[1],next_pos[2]] = 1
-
     def get_vacant(self, indices):
         # return whether each index is vacant or not
         exist_agent = self.map[indices[:,0], indices[:,1]].astype(np.bool)
@@ -76,16 +70,34 @@ class AgentMap(object):
         #print(picked)
         return indices[vacant][picked]
 
+    def move(self, prev_pos, next_pos):
+        assert self.map[prev_pos[0],prev_pos[1],prev_pos[2]] == 1
+        assert self.map[next_pos[0],next_pos[1],next_pos[2]] == 0
+        self.map[prev_pos[0],prev_pos[1],prev_pos[2]] = 0
+        self.map[next_pos[0],next_pos[1],next_pos[2]] = 1
+        return
 
+    def disappear(self, pos):
+        assert self.map[pos[0],pos[1],pos[2]] == 1
+        self.map[pos[0],pos[1],pos[2]] = 0
+        return
+
+    def appear(self, pos):
+        assert self.map[pos[0],pos[1],pos[2]] == 0
+        self.map[pos[0],pos[1],pos[2]] = 1
+        return
 
 class Simulation(object):
     def __init__(self, width=10, height=20,
                  x_exit_stand = 4, x_exit_walk = 6, y_exit_stand = 0, y_exit_walk = 0,
-                 mu=0.2):
+                 mu=0.2, remove_on_exit=False):
         self.width = width
         self.height = height
         self.mu = mu
         self.history = []
+        self.remove_on_exit = remove_on_exit
+        self.exit_stand = (y_exit_stand, x_exit_stand)
+        self.exit_walk = (y_exit_walk, x_exit_walk)
 
         # create static distance_field
         xcoord = np.repeat(np.arange(width).reshape(1,width), height, axis=0)
@@ -129,13 +141,17 @@ class Simulation(object):
 
         # next_pos -> [(prev_pos1, a_type1), (prev_pos2, a_type2), ...]
         dict_move = defaultdict(lambda : [])
-
+        list_disappear = []
 
         for y in range(self.height):
             for x in range(self.width):
                 #print("--",(y,x), "--")
                 if agent_map_next.map[y, x, 0]:
                     # a stander exists
+                    # disappear?
+                    if self.remove_on_exit and (y,x) == self.exit_stand:
+                        list_disappear.append((y,x,0))
+                    # move?
                     nn_pos = get_index_nn(y, x, self.width, self.height)
                     next_pos = agent_map_next.get_next_cell(nn_pos, self.distance_field_stand)
                     if next_pos is not None:
@@ -143,6 +159,10 @@ class Simulation(object):
                         dict_move[tuple(next_pos)].append((y,x,0))
                 if agent_map_next.map[y, x, 1]:
                     # a walker exists
+                    # disappear?
+                    if self.remove_on_exit and (y,x) == self.exit_walk:
+                        list_disappear.append((y,x,1))
+                    # move?
                     nn_pos = get_index_nn(y, x, self.width, self.height)
                     next_pos = agent_map_next.get_next_cell(nn_pos, self.distance_field_walk)
                     if next_pos is not None:
@@ -175,6 +195,9 @@ class Simulation(object):
                         prev_candidates[picked],
                         (next_pos[0], next_pos[1], prev_candidates[picked][2])
                     )
+        for pos in list_disappear:
+            agent_map_next.disappear(pos)
+
         self.history.append(agent_map_next)
         return agent_map_next
 
@@ -185,8 +208,8 @@ class Simulation(object):
         return
 
 if __name__ == "__main__":
-    sim = Simulation(width=10, height=20)
-    sim.initialize()
+    sim = Simulation(width=10, height=20, remove_on_exit=True)
+    sim.initialize(n_stander=50, n_walker=1)
     sim.run(100)
 
     fig = plt.figure(figsize=(10,8))
@@ -205,4 +228,7 @@ if __name__ == "__main__":
     fig.add_subplot(2,2,4)
     plt.plot([np.nonzero(am.map[:,:,1])[1] for am in sim.history])
     plt.ylim(0,10)
+    plt.show()
+
+    sim.plot()
     plt.show()
